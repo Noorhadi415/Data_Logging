@@ -1,0 +1,100 @@
+from flask import Flask, request, jsonify, render_template_string
+import csv
+import os
+from datetime import datetime
+
+app = Flask(_name_)
+CSV_FILE = "sensor_data.csv"
+
+# Create CSV file if it doesn't exist
+if not os.path.exists(CSV_FILE):
+    with open(CSV_FILE, mode='w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "Timestamp",
+            "angleX", "angleY", "angleZ",
+            "accX", "accY", "accZ",
+            "gyroX", "gyroY", "gyroZ",
+            "magX", "magY", "magZ",
+            "temp"
+        ])
+
+# === Endpoint to receive ESP8266 data ===
+@app.route('/sensor/upload', methods=['POST'])
+def receive_sensor_data():
+    try:
+        data = request.get_json()
+
+        timestamp = data.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        angle = data.get("angle", [0, 0, 0])
+        acc = data.get("acc", [0, 0, 0])
+        gyro = data.get("gyro", [0, 0, 0])
+        mag = data.get("mag", [0, 0, 0])
+        temp = data.get("temp", 0)
+
+        with open(CSV_FILE, mode='a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                timestamp,
+                *angle,
+                *acc,
+                *gyro,
+                *mag,
+                temp
+            ])
+
+        print(f"✅ Received Data:\n{data}")
+        return jsonify({"message": "✅ Data received and saved"}), 200
+
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return jsonify({"error": str(e)}), 400
+
+# === Auto-refresh + Auto-scroll CSV viewer ===
+@app.route('/view', methods=['GET'])
+def view_csv():
+    try:
+        with open(CSV_FILE, newline='') as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+
+        headers = rows[0]
+        data = rows[1:]
+
+        html = """
+        <html>
+        <head>
+            <title>Sensor Data Viewer</title>
+            <meta http-equiv="refresh" content="1">  <!-- Refresh every 1 second -->
+            <style>
+                body { font-family: Arial; padding: 20px; }
+                table { border-collapse: collapse; width: 100%; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+                th { background-color: #f2f2f2; }
+                tr:hover { background-color: #f9f9f9; }
+            </style>
+        </head>
+        <body>
+            <h2>📊 Live Sensor Data (Auto-Refresh + Auto-Scroll)</h2>
+            <table>
+                <tr>{% for h in headers %}<th>{{ h }}</th>{% endfor %}</tr>
+                {% for row in rows %}
+                    <tr>{% for item in row %}<td>{{ item }}</td>{% endfor %}</tr>
+                {% endfor %}
+            </table>
+
+            <script>
+                window.onload = function () {
+                    window.scrollTo(0, document.body.scrollHeight);
+                };
+            </script>
+        </body>
+        </html>
+        """
+        return render_template_string(html, headers=headers, rows=data)
+
+    except Exception as e:
+        return f"<h3>Error loading CSV: {e}</h3>"
+
+if _name_ == '_main_':
+    app.run(host='0.0.0.0', port=5000, debug=True)
